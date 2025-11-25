@@ -1,0 +1,6 @@
+numpy
+pandas
+torch
+requests
+sgp4
+matplotlib
