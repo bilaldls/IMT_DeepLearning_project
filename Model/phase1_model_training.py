@@ -329,7 +329,7 @@ def evaluate_model(
 # -----------------------------
 def main():
     parser = argparse.ArgumentParser(description="Train LSTM/GRU orbital predictor (t+1)")
-    parser.add_argument("--data", default="/Users/bilaldelais/Desktop/project deep learning/data/TERRA.csv", help="Path to dataset CSV")
+    parser.add_argument("--data", default="/Users/bilaldelais/Desktop/project deep learning/data/processed/TERRA.csv", help="Path to dataset CSV")
     parser.add_argument("--model", choices=["lstm", "gru"], help="(deprecated) Train a single model type")
     parser.add_argument(
         "--models",
