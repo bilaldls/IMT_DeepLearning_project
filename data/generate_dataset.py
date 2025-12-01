@@ -1,3 +1,10 @@
+from config import CELESTRAK_URL
+import requests
+from typing import Tuple
+class TLEFetchError(Exception):
+    """Custom exception for TLE fetching errors."""
+    pass
+
 def fetch_tle(identifier: str) -> Tuple[str, str]:
     """Fetch TLE lines from Celestrak using catalog number or common name."""
     params = {"FORMAT": "TLE", "CATNR": identifier}
