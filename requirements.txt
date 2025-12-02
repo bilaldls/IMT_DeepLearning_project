@@ -4,3 +4,12 @@ torch
 requests
 sgp4
 matplotlib
+
+
+skyfield
+astroquery
+astropy
+numpy
+pandas
+python-dateutil
+requests
