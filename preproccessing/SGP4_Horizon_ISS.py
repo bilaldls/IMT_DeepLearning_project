@@ -24,6 +24,7 @@ OUTPUT_DATASET = "dataset_iss_sgp4_vs_horizons.csv"
 
 MAX_RETRIES = 3          # nb de tentatives par chunk avant split ou NaN
 RETRY_SLEEP_SECONDS = 3  # pause entre tentatives
+MAX_CHUNK_SIZE = 25     # nombre max de dates envoyées à Horizons d'un coup
 
 load = Loader(".")
 ts = load.timescale()
@@ -42,13 +43,12 @@ def load_tles_from_csv(path):
     tles = []
     for _, row in df.iterrows():
         epoch_str = row["epoch"]
-        epoch_dt = dateparser.parse(epoch_str)  # gère ISO automatiquement
+        epoch_dt = dateparser.parse(epoch_str)
         name = str(row["name"])
         l1 = str(row["line1"])
         l2 = str(row["line2"])
         tles.append((epoch_dt, name, l1, l2))
 
-    # tri par epoch croissant
     tles.sort(key=lambda x: x[0])
     return tles
 
@@ -59,14 +59,6 @@ def load_tles_from_csv(path):
 
 def generate_sgp4_trajectory(tles, step_minutes=STEP_MINUTES,
                              extra_hours_last=EXTRA_HOURS_LAST):
-    """
-    tles: liste (epoch_dt, name, l1, l2) triée.
-    Retourne:
-        times_dt      : liste de datetime UTC
-        sgp4_pos      : np.ndarray (N,3) positions (km)
-        tle_index     : liste d'indices TLE (0,1,2,…) pour chaque point
-        dt_since_tle  : np.ndarray (N,) delta t en secondes depuis l'epoch du TLE
-    """
     all_times = []
     all_positions = []
     all_tle_idx = []
@@ -104,26 +96,15 @@ def generate_sgp4_trajectory(tles, step_minutes=STEP_MINUTES,
 
 
 # =========================
-# 4) Positions Horizons (robuste : retries + split + NaN)
+# 4) Positions Horizons (robuste + chunk fixe)
 # =========================
 
 def fetch_horizons_positions(times_dt, horizons_id=HORIZONS_ID):
-    """
-    Récupère les positions Horizons pour une liste de datetime.
-    - Convertit en JD (UTC)
-    - Récupère les vecteurs en découpant récursivement en chunks
-      - retry jusqu'à MAX_RETRIES en cas de HTTPError (ex: 502)
-      - si toujours KO:
-          * si chunk > 1 : split en 2
-          * si chunk == 1 : on met [NaN, NaN, NaN] et on continue
 
-    Retourne np.ndarray (N,3) en km (avec éventuellement des NaN).
-    """
-    print(f"Requête Horizons pour {len(times_dt)} dates (découpe automatique, retries)...")
+    print(f"Requête Horizons pour {len(times_dt)} dates")
 
-    # Conversion en Julian Date (UTC -> JD)
     times_jd = Time(times_dt, scale="utc").jd
-    positions = []  # même ordre que times_jd
+    positions = []
 
     def fetch_chunk(jd_chunk, depth=0):
         nonlocal positions
@@ -134,12 +115,11 @@ def fetch_horizons_positions(times_dt, horizons_id=HORIZONS_ID):
         indent = "  " * depth
         print(f"{indent}-> chunk de {len(jd_chunk)} epochs")
 
-        # tentative(s) sur ce chunk complet
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 obj = Horizons(
                     id=horizons_id,
-                    location="500@399",   # Terre (géocentrique)
+                    location="500@399",
                     epochs=jd_chunk
                 )
                 vec = obj.vectors()
@@ -151,8 +131,6 @@ def fetch_horizons_positions(times_dt, horizons_id=HORIZONS_ID):
 
                 for i in range(len(x)):
                     positions.append([x[i], y[i], z[i]])
-
-                # succès, on sort de la fonction
                 return
 
             except HTTPError as e:
@@ -163,14 +141,11 @@ def fetch_horizons_positions(times_dt, horizons_id=HORIZONS_ID):
                 else:
                     print(f"{indent}  -> échec après {MAX_RETRIES} tentatives")
 
-        # si on arrive ici : toutes les tentatives sur ce chunk ont échoué
         if len(jd_chunk) == 1:
-            # on ne plante pas : on met des NaN pour garder la taille cohérente
             print(f"{indent}!! Échec définitif pour epoch {jd_chunk[0]} -> [NaN, NaN, NaN]")
             positions.append([np.nan, np.nan, np.nan])
             return
 
-        # sinon chunk > 1 : on split en 2
         mid = len(jd_chunk) // 2
         left = jd_chunk[:mid]
         right = jd_chunk[mid:]
@@ -178,14 +153,19 @@ def fetch_horizons_positions(times_dt, horizons_id=HORIZONS_ID):
         fetch_chunk(left, depth + 1)
         fetch_chunk(right, depth + 1)
 
-    # Lancement sur tout le vecteur de dates
-    fetch_chunk(times_jd)
+    n_total = len(times_jd)
+    print(f"Découpage initial en chunks de taille {MAX_CHUNK_SIZE} (total {n_total} epochs)")
+
+    for start in range(0, n_total, MAX_CHUNK_SIZE):
+        end = min(start + MAX_CHUNK_SIZE, n_total)
+        jd_chunk = times_jd[start:end]
+        print(f"Chunk [{start}:{end}] -> {len(jd_chunk)} epochs")
+        fetch_chunk(jd_chunk)
 
     positions = np.array(positions)
-    if positions.shape[0] != len(times_jd):
-        # sécurité : ça ne devrait pas arriver avec la logique ci-dessus
+    if positions.shape[0] != n_total:
         raise RuntimeError(
-            f"Incohérence : {positions.shape[0]} positions pour {len(times_jd)} dates"
+            f"Incohérence : {positions.shape[0]} positions pour {n_total} dates"
         )
 
     return positions
@@ -196,27 +176,22 @@ def fetch_horizons_positions(times_dt, horizons_id=HORIZONS_ID):
 # =========================
 
 def build_dataset():
-    # 1) TLE
+
     tles = load_tles_from_csv(CSV_TLE_FILE)
     print(f"{len(tles)} TLE chargés depuis {CSV_TLE_FILE}")
 
-    # 2) SGP4
     times_dt, sgp4_pos, tle_idx, dt_since_tle = generate_sgp4_trajectory(tles)
 
-    # 3) Horizons
     horizons_pos = fetch_horizons_positions(times_dt)
 
     if sgp4_pos.shape != horizons_pos.shape:
         raise RuntimeError("Dimensions différentes entre SGP4 et Horizons")
 
-    # 4) Erreurs
     diff = sgp4_pos - horizons_pos
     err_norm = np.linalg.norm(diff, axis=1)
 
-    # 5) Infos TLE associées
     tle_epochs = [tles[i][0] for i in tle_idx]
 
-    # 6) DataFrame final
     df = pd.DataFrame({
         "time_utc": [dt.isoformat() for dt in times_dt],
         "tle_index": tle_idx,
