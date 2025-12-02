@@ -16,7 +16,7 @@ from requests.exceptions import HTTPError
 # 1) Constantes
 # =========================
 
-CSV_TLE_FILE = "iss_last_20_tles_spacetrack.csv"  # ton fichier epoch;name;line1;line2
+CSV_TLE_FILE = "iss_last_20_tles_spacetrack.csv"  # attention : modifier si besoin avec le chemin du fichier TLE
 HORIZONS_ID = "-125544"  # ISS
 STEP_MINUTES = 5
 EXTRA_HOURS_LAST = 6
