@@ -53,16 +53,6 @@ htmlcov/
 .tox/
 .nox/
 
-# ===========================
-# DATASETS / SORTIES
-# (mets ici tous les dossiers que tu génères)
-# ===========================
-data/
-outputs/
-cache/
-models/
-checkpoints/
-runs/
 
 # ===========================
 # AUTRES FICHIERS À IGNORER
