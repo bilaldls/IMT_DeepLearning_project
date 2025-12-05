@@ -81,8 +81,13 @@ def load_data(csv_path: str) -> pd.DataFrame:
         raise ValueError(f"Missing required raw columns in CSV: {', '.join(missing_raw)}")
 
     # Conversion de l'epoch texte → timestamp numérique (secondes Unix)
-    # On garde un float64 pour rester compatible avec MinMaxScaler.
-    df["epoch_unix"] = pd.to_datetime(df["epoch"]).astype("int64") // 10**9
+    # On supporte les formats ISO8601 hétérogènes (avec/sans microsecondes, avec décalage horaire).
+    try:
+        epoch_dt = pd.to_datetime(df["epoch"], format="ISO8601")
+    except (TypeError, ValueError):
+        # Fallback au mode 'mixed' si jamais certains formats sont exotiques
+        epoch_dt = pd.to_datetime(df["epoch"], format="mixed")
+    df["epoch_unix"] = epoch_dt.astype("int64") // 10**9
 
     # Identifiant de satellite utilisé pour construire les séquences
     df["sat_id"] = df["satellite_number"]
@@ -257,7 +262,7 @@ def train(
     criterion = nn.L1Loss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3, verbose=True
+        optimizer, mode="min", factor=0.5, patience=3
     )
 
     model.to(device)
@@ -372,7 +377,11 @@ class TrainArgs:
 def parse_args() -> TrainArgs:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Train LSTM to predict next TLE vector.")
-    parser.add_argument("--csv", required=True, help="Path to CSV containing TLE vectors.")
+    parser.add_argument(
+        "--csv",
+        default="/Users/bilaldelais/Desktop/project deep learning/data/processed/iss_200000_parsed.csv",
+        help="Path to CSV containing TLE vectors."
+    )
     parser.add_argument("--seq-len", type=int, default=20, help="Sequence length L.")
     parser.add_argument("--hidden", type=int, default=128, help="Hidden size of LSTM.")
     parser.add_argument("--layers", type=int, default=2, help="Number of LSTM layers.")
@@ -409,7 +418,7 @@ def main() -> None:
     args = parse_args()
 
     # Force le chemin automatiquement
-    args.csv = "/Users/bilaldelais/Desktop/project deep learning/data/iss_200000_parsed.csv"
+    #args.csv = "/Users/bilaldelais/Desktop/project deep learning/data/iss_200000_parsed.csv"
     
     set_seed(args.seed)
 
