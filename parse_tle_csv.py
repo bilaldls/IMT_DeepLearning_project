@@ -164,8 +164,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    input_csv = Path("/Users/bilaldelais/Desktop/project deep learning/data/raw/iss_last_2000_tles_spacetrack.csv")
-    output_csv = Path("/Users/bilaldelais/Desktop/project deep learning/data/processed/iss_2000_parsed.csv")
+    input_csv = Path("/Users/bilaldelais/Desktop/project deep learning/data/raw/iss_last_200000_tles_spacetrack.csv")
+    output_csv = Path("/Users/bilaldelais/Desktop/project deep learning/data/processed/iss_200000_parsed.csv")
     
     expand_tle_csv(input_csv, output_csv)
 
