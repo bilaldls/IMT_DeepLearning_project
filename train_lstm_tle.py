@@ -22,6 +22,7 @@ import torch
 from sklearn.preprocessing import MinMaxScaler
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
+import matplotlib.pyplot as plt
 
 # Toutes les colonnes FEATURES issues de ton CSV + epoch_unix dérivé de "epoch".
 # On exclut uniquement les colonnes textuelles (epoch, name, classification,
@@ -372,6 +373,7 @@ class TrainArgs:
     seed: int
     model_path: str
     scaler_path: str
+    horizon_k: int
 
 
 def parse_args() -> TrainArgs:
@@ -388,6 +390,12 @@ def parse_args() -> TrainArgs:
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate.")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs.")
+    parser.add_argument(
+        "--horizon-k",
+        type=int,
+        default=20,
+        help="Number of future TLE steps to predict after training.",
+    )
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
     parser.add_argument("--val-split", type=float, default=0.15, help="Validation split ratio.")
     parser.add_argument("--test-split", type=float, default=0.15, help="Test split ratio.")
@@ -411,6 +419,7 @@ def parse_args() -> TrainArgs:
         seed=args_ns.seed,
         model_path=args_ns.model_path,
         scaler_path=args_ns.scaler_path,
+        horizon_k=args_ns.horizon_k,
     )
 
 
@@ -434,9 +443,15 @@ def main() -> None:
 
     print(f"Device: {device}")
 
-
-
     df = load_data(args.csv)
+
+    # Compute, print and save correlation matrix on feature columns
+    corr = df[FEATURE_COLS].corr()
+    print("Feature correlation matrix:")
+    print(corr)
+    corr.to_csv("feature_correlation_matrix.csv")
+    print("Correlation matrix saved to feature_correlation_matrix.csv")
+
     features_scaled, scaler = fit_and_scale(df)
     sequences, targets = build_sequences(features_scaled, df["sat_id"].to_numpy(), args.seq_len)
 
@@ -476,6 +491,49 @@ def main() -> None:
 
     test_mae = evaluate(model, test_loader, device)
     print(f"Test MAE: {test_mae:.6f}")
+
+    # Save structured CSV log of training and validation MAE (and final test MAE)
+    log_df = pd.DataFrame(
+        {
+            "epoch": np.arange(1, len(train_hist) + 1),
+            "train_mae": train_hist,
+            "val_mae": val_hist,
+        }
+    )
+    log_df["test_mae"] = np.nan
+    log_df.loc[len(log_df) - 1, "test_mae"] = test_mae
+    log_df.to_csv("training_log.csv", index=False)
+    print("Training log saved to training_log.csv")
+
+    # Plot and save train/val MAE curve
+    plt.figure()
+    epochs_arr = np.arange(1, len(train_hist) + 1)
+    plt.plot(epochs_arr, train_hist, label="train MAE")
+    plt.plot(epochs_arr, val_hist, label="val MAE")
+    plt.xlabel("Epoch")
+    plt.ylabel("MAE")
+    plt.title("Train vs Validation MAE")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("train_val_mae.png")
+    plt.close()
+    print("Train/val MAE curve saved to train_val_mae.png")
+
+    # Predict and save future TLE vectors based on the last seq_len feature vectors
+    last_seq_original = df[FEATURE_COLS].to_numpy(dtype=np.float32)[-args.seq_len :]
+    future_preds = predict_future_tles(
+        model=model,
+        scaler=scaler,
+        tle_sequence=last_seq_original,
+        horizon_k=args.horizon_k,
+        device=device,
+    )
+    future_df = pd.DataFrame(future_preds, columns=FEATURE_COLS)
+    future_df.to_csv("future_tle_predictions.csv", index_label="step")
+    print(
+        f"Future TLE predictions ({args.horizon_k} steps) saved to future_tle_predictions.csv"
+    )
 
     torch.save(model.state_dict(), args.model_path)
     with open(args.scaler_path, "wb") as f:
