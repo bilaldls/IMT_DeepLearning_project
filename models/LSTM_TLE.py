@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader, Dataset
 class TrainConfig:
     data_path: str = "TERRA.csv"
     window_size: int = 20
+    pred_horizon: int = 1  # number of future steps (n TLE) to predict
     batch_size: int = 64
     hidden_size: int = 128
     num_layers: int = 2
@@ -85,15 +86,22 @@ def load_data(path: str) -> pd.DataFrame:
 
 
 def create_sequences(
-    data: np.ndarray, window_size: int
+    data: np.ndarray, window_size: int, horizon: int = 1
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Convert normalized data into sliding windows (X) and next-step targets (y)."""
+    """
+    Convert normalized data into sliding windows (X) and multi-step targets (y).
+
+    X shape: (N_samples, window_size, n_features)
+    y shape: (N_samples, horizon * n_features)  # future horizon flattened
+    """
     xs, ys = [], []
-    for i in range(len(data) - window_size):
-        x_seq = data[i : i + window_size] #L états consécutifs
-        y = data[i + window_size] #état suivant
+    n = len(data)
+    # We need at least window_size past points + horizon future points
+    for i in range(n - window_size - horizon + 1):
+        x_seq = data[i : i + window_size]          # L états consécutifs
+        y_seq = data[i + window_size : i + window_size + horizon]  # n états futurs
         xs.append(x_seq)
-        ys.append(y)
+        ys.append(y_seq.reshape(-1))  # on aplatit (horizon, n_features) -> (horizon*n_features,)
     return np.stack(xs), np.stack(ys)
 
 
@@ -238,8 +246,16 @@ def evaluate_model(
     mse_norm = float(np.mean(losses))
 
     # Concaténation des batchs
-    preds = np.concatenate(preds_list, axis=0)     # (N, 6) normalisé
-    targets = np.concatenate(targets_list, axis=0) # (N, 6) normalisé
+    preds = np.concatenate(preds_list, axis=0)     # (N, horizon * n_features) normalisé
+    targets = np.concatenate(targets_list, axis=0) # (N, horizon * n_features) normalisé
+
+    # On déduit la dimension et l'horizon à partir de mean/std
+    n_features = mean.shape[0]  # ex: 6 (x, y, z, vx, vy, vz)
+    horizon = preds.shape[1] // n_features
+
+    # On remet toutes les prédictions/targets sur une seule dimension temporelle
+    preds = preds.reshape(-1, n_features)     # (N * horizon, n_features)
+    targets = targets.reshape(-1, n_features) # (N * horizon, n_features)
 
     # Dénormalisation
     preds_phys = preds * std + mean
@@ -249,24 +265,24 @@ def evaluate_model(
     rmse_global = math.sqrt(np.mean((preds_phys - targets_phys) ** 2))
 
     # 3) RMSE par dimension
-    err_sq = (preds_phys - targets_phys) ** 2  # (N, 6)
-    rmse_per_dim = np.sqrt(err_sq.mean(axis=0))  # (6,)
+    err_sq = (preds_phys - targets_phys) ** 2  # (N_total, n_features)
+    rmse_per_dim = np.sqrt(err_sq.mean(axis=0))  # (n_features,)
 
     # 4) Position RMSE 3D (km)
-    pos_pred = preds_phys[:, :3]   # (N, 3)
+    pos_pred = preds_phys[:, :3]   # (N_total, 3)
     pos_true = targets_phys[:, :3]
-    pos_err_sq = np.sum((pos_pred - pos_true) ** 2, axis=1)  # (N,)
+    pos_err_sq = np.sum((pos_pred - pos_true) ** 2, axis=1)  # (N_total,)
     pos_rmse = float(np.sqrt(pos_err_sq.mean()))
 
     # 5) Velocity RMSE 3D (km/s)
-    vel_pred = preds_phys[:, 3:]   # (N, 3)
+    vel_pred = preds_phys[:, 3:]   # (N_total, 3)
     vel_true = targets_phys[:, 3:]
     vel_err_sq = np.sum((vel_pred - vel_true) ** 2, axis=1)
     vel_rmse = float(np.sqrt(vel_err_sq.mean()))
 
     # 6) Energy RMSE
     mu = 398600.4418  # km^3/s^2
-    r_true = np.linalg.norm(pos_true, axis=1)  # (N,)
+    r_true = np.linalg.norm(pos_true, axis=1)  # (N_total,)
     r_pred = np.linalg.norm(pos_pred, axis=1)
     v2_true = np.sum(vel_true ** 2, axis=1)
     v2_pred = np.sum(vel_pred ** 2, axis=1)
@@ -339,6 +355,7 @@ def main():
         help="List of models to train/evaluate (default: both)",
     )
     parser.add_argument("--window", type=int, default=20, help="Sliding window length L")
+    parser.add_argument("--horizon", type=int, default=1, help="Number of future steps (n TLE) to predict")
     parser.add_argument("--epochs", type=int, default=50, help="Max training epochs")
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
     parser.add_argument("--hidden", type=int, default=128, help="Hidden size")
@@ -353,6 +370,7 @@ def main():
     base_cfg = TrainConfig(
         data_path=args.data,
         window_size=args.window,
+        pred_horizon=args.horizon,
         batch_size=args.batch,
         hidden_size=args.hidden,
         num_layers=args.layers,
@@ -390,10 +408,10 @@ def main():
     val_norm = (val_data - mean) / std
     test_norm = (test_data - mean) / std
 
-    # Sliding windows
-    x_train, y_train = create_sequences(train_norm, base_cfg.window_size)
-    x_val, y_val = create_sequences(val_norm, base_cfg.window_size)
-    x_test, y_test = create_sequences(test_norm, base_cfg.window_size)
+    # Sliding windows (multi-step targets)
+    x_train, y_train = create_sequences(train_norm, base_cfg.window_size, base_cfg.pred_horizon)
+    x_val, y_val = create_sequences(val_norm, base_cfg.window_size, base_cfg.pred_horizon)
+    x_test, y_test = create_sequences(test_norm, base_cfg.window_size, base_cfg.pred_horizon)
 
     # DataLoaders
     train_loader = DataLoader(OrbitDataset(x_train, y_train), batch_size=base_cfg.batch_size, shuffle=True)
@@ -401,7 +419,7 @@ def main():
     test_loader = DataLoader(OrbitDataset(x_test, y_test), batch_size=base_cfg.batch_size, shuffle=False)
 
     input_size = len(feature_cols)
-    output_size = len(feature_cols)
+    output_size = len(feature_cols) * base_cfg.pred_horizon
     save_root, save_ext = os.path.splitext(args.save)
     default_ext = save_ext if save_ext else ".pth"
     results = {}
@@ -411,6 +429,7 @@ def main():
         cfg = TrainConfig(
             data_path=base_cfg.data_path,
             window_size=base_cfg.window_size,
+            pred_horizon=base_cfg.pred_horizon,
             batch_size=base_cfg.batch_size,
             hidden_size=base_cfg.hidden_size,
             num_layers=base_cfg.num_layers,
@@ -470,6 +489,7 @@ def main():
                 "hidden_size": cfg.hidden_size,
                 "num_layers": cfg.num_layers,
                 "window_size": cfg.window_size,
+                "pred_horizon": cfg.pred_horizon,
                 "mean": mean,
                 "std": std,
                 "feature_cols": feature_cols,

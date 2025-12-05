@@ -4,7 +4,7 @@ torch
 requests
 sgp4
 matplotlib
-
+sckit-learn
 
 skyfield
 astroquery
