@@ -13,7 +13,7 @@ SPACETRACK_PASS = "REMOVED_SPACETRACK_PASSWORD"
 
 NORAD_ID = 25544          # ISS
 SAT_NAME = "ISS"
-OUTPUT_CSV = "iss_last_2000_tles_spacetrack.csv"
+OUTPUT_CSV = "iss_last_200000_tles_spacetrack.csv"
 
 BASE_URL = "https://www.space-track.org"
 
@@ -24,7 +24,7 @@ TLE_URL = (
     "class/tle/"
     f"NORAD_CAT_ID/{NORAD_ID}/"
     "orderby/EPOCH%20desc/"
-    "limit/2000/"
+    "limit/200000/"
     "format/tle"
 )
 
@@ -48,7 +48,7 @@ def parse_tle_epoch(epoch_str: str) -> datetime:
 
 def fetch_last_iss_tles_spacetrack():
     """
-    Récupère les 20 derniers TLE de l'ISS (NORAD 25544) via Space-Track
+    Récupère les 200 000 derniers TLE de l'ISS (NORAD 25544) via Space-Track
     et retourne une liste de tuples (epoch_datetime, name, line1, line2).
     """
     with requests.Session() as s:
@@ -117,7 +117,7 @@ def fetch_last_iss_tles_spacetrack():
         # normalement déjà triés par EPOCH desc, mais on sécurise
         tles.sort(key=lambda x: x[0], reverse=True)
         # garder max 2000 TLE
-        tles = tles[:2000]
+        tles = tles[:200000]
 
         print(f"{len(tles)} TLE récupérés pour ISS (NORAD {NORAD_ID}).")
         return tles
@@ -143,7 +143,7 @@ if __name__ == "__main__":
 
     # Aperçu dans le terminal
     for i, (epoch, name, l1, l2) in enumerate(tles, start=1):
-        print(f"\nTLE {i}/2000  epoch={epoch}")
+        print(f"\nTLE {i}/200000  epoch={epoch}")
         print(name)
         print(l1)
         print(l2)
