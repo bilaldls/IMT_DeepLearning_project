@@ -38,6 +38,7 @@ import pandas as pd
 import torch
 from sklearn.preprocessing import MinMaxScaler
 from torch import nn
+import matplotlib.pyplot as plt
 
 from sgp4.api import Satrec, WGS72, jday
 
@@ -467,6 +468,16 @@ def main() -> None:
     print("Erreur round-trip scaler (y_true vs df[FEATURE_COLS]) :")
     print(scaler_err_df)
 
+    # Plot des erreurs round-trip du scaler (MAE par feature)
+    plt.figure(figsize=(10, 4))
+    plt.bar(scaler_err_df["feature"], scaler_err_df["mae"])
+    plt.xticks(rotation=90)
+    plt.ylabel("MAE (unités physiques)")
+    plt.title("Erreur round-trip scaler par feature")
+    plt.tight_layout()
+    plt.savefig("feature_errors_scaler_roundtrip_mae.png")
+    plt.close()
+
     # -------------------------------
     # Vérification 2 : erreurs par feature du modèle (en unités physiques)
     # -------------------------------
@@ -484,6 +495,16 @@ def main() -> None:
     model_err_df.to_csv("feature_errors_model.csv", index=False)
     print("Erreur de prédiction du modèle par feature (en unités physiques) :")
     print(model_err_df)
+
+    # Plot des erreurs du modèle par feature (MAE)
+    plt.figure(figsize=(10, 4))
+    plt.bar(model_err_df["feature"], model_err_df["mae"])
+    plt.xticks(rotation=90)
+    plt.ylabel("MAE (unités physiques)")
+    plt.title("Erreur du modèle par feature")
+    plt.tight_layout()
+    plt.savefig("feature_errors_model_mae.png")
+    plt.close()
 
     # Index des colonnes pour accéder rapidement aux features
     col_index = {name: i for i, name in enumerate(FEATURE_COLS)}
@@ -624,6 +645,41 @@ def main() -> None:
     out_df.to_csv(args.output_csv, index=False)
     print(f"Résultats enregistrés dans {args.output_csv}")
     print(out_df.head())
+
+    # -------------------------------
+    # Plots des erreurs SGP4 (position en km)
+    # -------------------------------
+    # Courbe des erreurs moyennes et max en fonction de l'index d'échantillon
+    plt.figure(figsize=(8, 4))
+    plt.plot(out_df["sample_index"], out_df["error_mean_km"], label="Erreur moyenne (km)")
+    plt.plot(out_df["sample_index"], out_df["error_max_km"], label="Erreur max (km)")
+    plt.xlabel("Index d'échantillon test")
+    plt.ylabel("Erreur (km)")
+    plt.title("Erreurs SGP4 (moyenne / max) par échantillon")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("sgp4_errors_per_sample.png")
+    plt.close()
+
+    # Histogramme des erreurs moyennes
+    plt.figure(figsize=(8, 4))
+    plt.hist(out_df["error_mean_km"], bins=30)
+    plt.xlabel("Erreur moyenne (km)")
+    plt.ylabel("Nombre d'échantillons")
+    plt.title("Distribution des erreurs SGP4 moyennes")
+    plt.tight_layout()
+    plt.savefig("sgp4_error_mean_hist.png")
+    plt.close()
+
+    # Histogramme des erreurs max
+    plt.figure(figsize=(8, 4))
+    plt.hist(out_df["error_max_km"], bins=30)
+    plt.xlabel("Erreur max (km)")
+    plt.ylabel("Nombre d'échantillons")
+    plt.title("Distribution des erreurs SGP4 max")
+    plt.tight_layout()
+    plt.savefig("sgp4_error_max_hist.png")
+    plt.close()
 
 
 if __name__ == "__main__":
