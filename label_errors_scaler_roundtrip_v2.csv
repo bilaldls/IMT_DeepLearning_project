@@ -1,0 +1,12 @@
+label,mae,max_abs_error
+mean_motion_revs_per_day,1.2212318e-07,9.536743e-07
+eccentricity,5.7385065e-12,4.656613e-10
+bstar_drag,2.934309e-11,1.1641532e-10
+inclination_sin,1.0721903e-08,5.9604645e-08
+inclination_cos,0.0,0.0
+raan_sin,1.766476e-08,5.9604645e-08
+raan_cos,1.7443835e-08,5.9604645e-08
+arg_perigee_sin,1.9398309e-08,5.9604645e-08
+arg_perigee_cos,1.8858955e-08,5.9604645e-08
+mean_anomaly_sin,1.8738184e-08,5.9604645e-08
+mean_anomaly_cos,1.8537737e-08,5.9604645e-08
