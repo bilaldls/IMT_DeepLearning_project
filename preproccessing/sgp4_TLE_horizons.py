@@ -1,7 +1,16 @@
-import csv
+"""
+Construit un dataset SGP4 vs JPL Horizons à partir d'un CSV de TLE
+(epoch;name;line1;line2, produit par fetch_tles.py).
+
+Exemple :
+    python preproccessing/sgp4_TLE_horizons.py \
+        --tles data/raw/iss_last_20_tles_spacetrack.csv --horizons-id -125544 \
+        --output data/dataset_iss_sgp4_vs_horizons.csv
+"""
+import argparse
 import math
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -16,7 +25,7 @@ from requests.exceptions import HTTPError
 # 1) Constantes
 # =========================
 
-CSV_TLE_FILE = "iss_last_20_tles_spacetrack.csv"  # fichier epoch;name;line1;line2 (peut être ajusté)
+CSV_TLE_FILE = "data/raw/iss_last_20_tles_spacetrack.csv"  # fichier epoch;name;line1;line2
 HORIZONS_ID = "-125544"  # ISS
 STEP_MINUTES = 5
 EXTRA_HOURS_LAST = 6
@@ -28,6 +37,17 @@ RETRY_SLEEP_SECONDS = 3  # pause entre tentatives
 
 load = Loader(".")
 ts = load.timescale()
+
+
+def to_skyfield_time(dt):
+    """
+    Convertit un datetime UTC (aware) en temps Skyfield en conservant les
+    microsecondes. Ne pas passer par ts.utc(..., dt.second) : la troncature
+    à la seconde décale SGP4 jusqu'à ~7.6 km le long de la trajectoire
+    (vitesse orbitale × fraction de seconde perdue) par rapport à Horizons,
+    qui reçoit l'instant exact.
+    """
+    return ts.from_datetime(dt)
 
 
 # =========================
@@ -44,6 +64,8 @@ def load_tles_from_csv(path):
     for _, row in df.iterrows():
         epoch_str = row["epoch"]
         epoch_dt = dateparser.parse(epoch_str)  # gère ISO automatiquement
+        if epoch_dt.tzinfo is None:
+            epoch_dt = epoch_dt.replace(tzinfo=timezone.utc)
         name = str(row["name"])
         l1 = str(row["line1"])
         l2 = str(row["line2"])
@@ -130,9 +152,7 @@ def generate_sgp4_trajectory(tles, step_minutes=STEP_MINUTES,
             dt_sec = (current_dt - epoch_dt).total_seconds()
             all_dt_since.append(dt_sec)
 
-            t_sf = ts.utc(current_dt.year, current_dt.month, current_dt.day,
-                          current_dt.hour, current_dt.minute, current_dt.second)
-            geo = sat.at(t_sf)
+            geo = sat.at(to_skyfield_time(current_dt))
             x, y, z = geo.position.km
             all_positions.append((x, y, z))
 
@@ -223,16 +243,16 @@ def fetch_horizons_positions(times_dt, horizons_id=HORIZONS_ID):
 # 5) Construction du dataset
 # =========================
 
-def build_dataset():
+def build_dataset(csv_tle_file=CSV_TLE_FILE, horizons_id=HORIZONS_ID, output_dataset=OUTPUT_DATASET):
     # 1) TLE
-    tles = load_tles_from_csv(CSV_TLE_FILE)
-    print(f"{len(tles)} TLE chargés depuis {CSV_TLE_FILE}")
+    tles = load_tles_from_csv(csv_tle_file)
+    print(f"{len(tles)} TLE chargés depuis {csv_tle_file}")
 
     # 2) SGP4
     times_dt, sgp4_pos, tle_idx, dt_since_tle, tle_params = generate_sgp4_trajectory(tles)
 
     # 3) Horizons
-    horizons_pos = fetch_horizons_positions(times_dt)
+    horizons_pos = fetch_horizons_positions(times_dt, horizons_id)
 
     if sgp4_pos.shape != horizons_pos.shape:
         raise RuntimeError("Dimensions différentes entre SGP4 et Horizons")
@@ -284,10 +304,19 @@ def build_dataset():
         "error_norm_km": err_norm,
     })
 
-    df.to_csv(OUTPUT_DATASET, sep=";", index=False)
-    print(f"Dataset écrit dans {OUTPUT_DATASET}")
+    df.to_csv(output_dataset, sep=";", index=False)
+    print(f"Dataset écrit dans {output_dataset}")
     print(df.head())
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Dataset SGP4 vs JPL Horizons")
+    parser.add_argument("--tles", default=CSV_TLE_FILE, help="CSV de TLE (epoch;name;line1;line2)")
+    parser.add_argument("--horizons-id", default=HORIZONS_ID, help="ID Horizons (voir data/satellites.csv)")
+    parser.add_argument("--output", default=OUTPUT_DATASET, help="CSV de sortie")
+    args = parser.parse_args()
+    build_dataset(args.tles, args.horizons_id, args.output)
+
+
 if __name__ == "__main__":
-    build_dataset()
+    main()
